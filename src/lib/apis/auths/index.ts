@@ -1,4 +1,9 @@
-import { WEBUI_API_BASE_URL } from '$lib/constants';
+import { WEBUI_API_BASE_URL, WEBUI_WEBAUTH_CALLBACK_URL } from '$lib/constants';
+
+export const redirectWebAuth = () => {
+	console.log(`Redirecting to ${WEBUI_WEBAUTH_CALLBACK_URL}`);
+	window.location = WEBUI_WEBAUTH_CALLBACK_URL;
+};
 
 export const getAdminDetails = async (token: string) => {
 	let error = null;

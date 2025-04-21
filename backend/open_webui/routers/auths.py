@@ -31,7 +31,7 @@ from open_webui.env import (
 )
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse, Response
-from open_webui.config import OPENID_PROVIDER_URL, ENABLE_OAUTH_SIGNUP, ENABLE_LDAP
+from open_webui.config import OPENID_PROVIDER_URL, ENABLE_OAUTH_SIGNUP, ENABLE_LDAP, WEBUI_URL
 from pydantic import BaseModel
 from open_webui.utils.misc import parse_duration, validate_email_format
 from open_webui.utils.auth import (
@@ -330,155 +330,26 @@ async def ldap_auth(request: Request, response: Response, form_data: LdapForm):
 ############################
 
 
-@router.post("/signin", response_model=SessionUserResponse)
-async def signin(request: Request, response: Response, form_data: SigninForm):
-    if WEBUI_AUTH_TRUSTED_EMAIL_HEADER:
-        if WEBUI_AUTH_TRUSTED_EMAIL_HEADER not in request.headers:
-            raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_TRUSTED_HEADER)
+@router.get("/signin", response_model=SessionUserResponse)
+async def signin(request: Request, response: Response,  ticket: str):
+    
+    # Get the ticket from the query parameters
+    WEBAUTH_CALLBACK = request.url.remove_query_params("ticket")
 
-        trusted_email = request.headers[WEBUI_AUTH_TRUSTED_EMAIL_HEADER].lower()
-        trusted_name = trusted_email
-        if WEBUI_AUTH_TRUSTED_NAME_HEADER:
-            trusted_name = request.headers.get(
-                WEBUI_AUTH_TRUSTED_NAME_HEADER, trusted_email
-            )
-        if not Users.get_user_by_email(trusted_email.lower()):
-            await signup(
-                request,
-                response,
-                SignupForm(
-                    email=trusted_email, password=str(uuid.uuid4()), name=trusted_name
-                ),
-            )
-        user = Auths.authenticate_user_by_trusted_header(trusted_email)
-    elif WEBUI_AUTH == False:
-        admin_email = "admin@localhost"
-        admin_password = "admin"
+    # Construct the URL for the webauth validation
+    WEBAUTH_URL = f"https://webauth.arizona.edu/webauth/validate?service={WEBAUTH_CALLBACK}&ticket={ticket}"
 
-        if Users.get_user_by_email(admin_email.lower()):
-            user = Auths.authenticate_user(admin_email.lower(), admin_password)
-        else:
-            if Users.get_num_users() != 0:
-                raise HTTPException(400, detail=ERROR_MESSAGES.EXISTING_USERS)
-
-            await signup(
-                request,
-                response,
-                SignupForm(email=admin_email, password=admin_password, name="User"),
-            )
-
-            user = Auths.authenticate_user(admin_email.lower(), admin_password)
-    else:
-        user = Auths.authenticate_user(form_data.email.lower(), form_data.password)
-
-    if user:
-
-        expires_delta = parse_duration(request.app.state.config.JWT_EXPIRES_IN)
-        expires_at = None
-        if expires_delta:
-            expires_at = int(time.time()) + int(expires_delta.total_seconds())
-
-        token = create_token(
-            data={"id": user.id},
-            expires_delta=expires_delta,
-        )
-
-        datetime_expires_at = (
-            datetime.datetime.fromtimestamp(expires_at, datetime.timezone.utc)
-            if expires_at
-            else None
-        )
-
-        # Set the cookie token
-        response.set_cookie(
-            key="token",
-            value=token,
-            expires=datetime_expires_at,
-            httponly=True,  # Ensures the cookie is not accessible via JavaScript
-            samesite=WEBUI_AUTH_COOKIE_SAME_SITE,
-            secure=WEBUI_AUTH_COOKIE_SECURE,
-        )
-
-        user_permissions = get_permissions(
-            user.id, request.app.state.config.USER_PERMISSIONS
-        )
-
-        return {
-            "token": token,
-            "token_type": "Bearer",
-            "expires_at": expires_at,
-            "id": user.id,
-            "email": user.email,
-            "name": user.name,
-            "role": user.role,
-            "profile_image_url": user.profile_image_url,
-            "permissions": user_permissions,
-        }
-    else:
-        raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_CRED)
-
-
-############################
-# SignUp
-############################
-
-
-@router.post("/signup", response_model=SessionUserResponse)
-async def signup(request: Request, response: Response, form_data: SignupForm):
-
-    if WEBUI_AUTH:
-        if (
-            not request.app.state.config.ENABLE_SIGNUP
-            or not request.app.state.config.ENABLE_LOGIN_FORM
-        ):
-            raise HTTPException(
-                status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED
-            )
-    else:
-        if Users.get_num_users() != 0:
-            raise HTTPException(
-                status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED
-            )
-
-    user_count = Users.get_num_users()
-    if not validate_email_format(form_data.email.lower()):
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST, detail=ERROR_MESSAGES.INVALID_EMAIL_FORMAT
-        )
-
-    if Users.get_user_by_email(form_data.email.lower()):
-        raise HTTPException(400, detail=ERROR_MESSAGES.EMAIL_TAKEN)
-
-    try:
-        role = (
-            "admin" if user_count == 0 else request.app.state.config.DEFAULT_USER_ROLE
-        )
-
-        if user_count == 0:
-            # Disable signup after the first user is created
-            request.app.state.config.ENABLE_SIGNUP = False
-
-        # The password passed to bcrypt must be 72 bytes or fewer. If it is longer, it will be truncated before hashing.
-        if len(form_data.password.encode("utf-8")) > 72:
-            raise HTTPException(
-                status.HTTP_400_BAD_REQUEST,
-                detail=ERROR_MESSAGES.PASSWORD_TOO_LONG,
-            )
-
-        hashed = get_password_hash(form_data.password)
-        user = Auths.insert_new_auth(
-            form_data.email.lower(),
-            hashed,
-            form_data.name,
-            form_data.profile_image_url,
-            role,
-        )
-
+    if ticket:
+        logging.info(
+            f"Received ticket. Authenticating user via \"{WEBAUTH_URL}\"...")
+        user = Auths.authenticate_user(WEBAUTH_URL)
         if user:
-            expires_delta = parse_duration(request.app.state.config.JWT_EXPIRES_IN)
+            expires_delta = parse_duration(
+                request.app.state.config.JWT_EXPIRES_IN)
             expires_at = None
             if expires_delta:
-                expires_at = int(time.time()) + int(expires_delta.total_seconds())
+                expires_at = int(time.time()) + \
+                    int(expires_delta.total_seconds())
 
             token = create_token(
                 data={"id": user.id},
@@ -486,7 +357,8 @@ async def signup(request: Request, response: Response, form_data: SignupForm):
             )
 
             datetime_expires_at = (
-                datetime.datetime.fromtimestamp(expires_at, datetime.timezone.utc)
+                datetime.datetime.fromtimestamp(
+                    expires_at, datetime.timezone.utc)
                 if expires_at
                 else None
             )
@@ -501,39 +373,15 @@ async def signup(request: Request, response: Response, form_data: SignupForm):
                 secure=WEBUI_AUTH_COOKIE_SECURE,
             )
 
-            if request.app.state.config.WEBHOOK_URL:
-                post_webhook(
-                    request.app.state.WEBUI_NAME,
-                    request.app.state.config.WEBHOOK_URL,
-                    WEBHOOK_MESSAGES.USER_SIGNUP(user.name),
-                    {
-                        "action": "signup",
-                        "message": WEBHOOK_MESSAGES.USER_SIGNUP(user.name),
-                        "user": user.model_dump_json(exclude_none=True),
-                    },
-                )
-
-            user_permissions = get_permissions(
-                user.id, request.app.state.config.USER_PERMISSIONS
-            )
-
-            return {
-                "token": token,
-                "token_type": "Bearer",
-                "expires_at": expires_at,
-                "id": user.id,
-                "email": user.email,
-                "name": user.name,
-                "role": user.role,
-                "profile_image_url": user.profile_image_url,
-                "permissions": user_permissions,
-            }
+            auth_callback_url = f"{WEBUI_URL}/auth?token={token}"
+            logging.info(
+                f"WebAuth authorized user: \"{user.name}\". Redirecting to {auth_callback_url}")
+            return RedirectResponse(url=auth_callback_url)
         else:
-            raise HTTPException(500, detail=ERROR_MESSAGES.CREATE_USER_ERROR)
-    except Exception as err:
-        log.error(f"Signup error: {str(err)}")
-        raise HTTPException(500, detail="An internal error occurred during signup.")
-
+            logging.info("Failed to authenticate user")
+            raise HTTPException(400, detail="Invalid credentials")
+    else:
+        raise HTTPException(400, detail="Ticket required")
 
 @router.get("/signout")
 async def signout(request: Request, response: Response):

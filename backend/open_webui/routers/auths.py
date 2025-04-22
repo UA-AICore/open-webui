@@ -345,7 +345,7 @@ async def signin(request: Request, response: Response,  ticket: str):
 
     if ENV == 'prod':
         # Always enforce https in production because WebAuth only works with https scheme unless its localhost
-        WEBAUTH_CALLBACK.scheme = "https"
+        WEBAUTH_CALLBACK = str(WEBAUTH_CALLBACK).replace("http://", "https://")
 
     # Construct the URL for the webauth validation
     WEBAUTH_URL = f"https://webauth.arizona.edu/webauth/validate?service={WEBAUTH_CALLBACK}&ticket={ticket}"

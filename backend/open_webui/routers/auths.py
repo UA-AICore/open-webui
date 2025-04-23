@@ -342,7 +342,7 @@ async def signin(request: Request, response: Response,  ticket: str):
     if ticket:
         logging.info(
             f"Received ticket. Authenticating user via \"{WEBAUTH_URL}\"...")
-        user = Auths.authenticate_user(WEBAUTH_URL)
+        user = Auths.authenticate_user(WEBAUTH_URL, request)
         if user:
             expires_delta = parse_duration(
                 request.app.state.config.JWT_EXPIRES_IN)

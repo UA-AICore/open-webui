@@ -5,6 +5,7 @@ from typing import Optional
 from open_webui.internal.db import Base, get_db
 from open_webui.models.users import UserModel, Users
 from open_webui.env import SRC_LOG_LEVELS
+from fastapi import Request
 from pydantic import BaseModel
 from sqlalchemy import Boolean, Column, String, Text
 from open_webui.utils.auth import get_netid, get_netid_email, verify_password
@@ -128,7 +129,7 @@ class AuthsTable:
             else:
                 return None
 
-    def authenticate_user(self, webauth_url: str) -> Optional[UserModel]:
+    def authenticate_user(self, webauth_url: str, request: Request) -> Optional[UserModel]:
         try:
             webauth_response = requests.get(webauth_url, timeout=5)
             webauth_response.raise_for_status()
@@ -150,7 +151,7 @@ class AuthsTable:
                 id,
                 netid,
                 email,
-                role="admin" if Users.get_num_users() == 0 else "pending",
+                role="admin" if Users.get_num_users() == 0 else request.app.state.config.DEFAULT_USER_ROLE,
             )
         return user
 

@@ -22,6 +22,7 @@ from open_webui.models.users import Users
 
 from open_webui.constants import ERROR_MESSAGES, WEBHOOK_MESSAGES
 from open_webui.env import (
+    ENV,
     WEBUI_AUTH,
     WEBUI_AUTH_TRUSTED_EMAIL_HEADER,
     WEBUI_AUTH_TRUSTED_NAME_HEADER,
@@ -195,7 +196,8 @@ async def ldap_auth(request: Request, response: Response, form_data: LdapForm):
         )
     except Exception as e:
         log.error(f"TLS configuration error: {str(e)}")
-        raise HTTPException(400, detail="Failed to configure TLS for LDAP connection.")
+        raise HTTPException(
+            400, detail="Failed to configure TLS for LDAP connection.")
 
     try:
         server = Server(
@@ -226,13 +228,16 @@ async def ldap_auth(request: Request, response: Response, form_data: LdapForm):
         )
 
         if not search_success:
-            raise HTTPException(400, detail="User not found in the LDAP server")
+            raise HTTPException(
+                400, detail="User not found in the LDAP server")
 
         entry = connection_app.entries[0]
         username = str(entry[f"{LDAP_ATTRIBUTE_FOR_USERNAME}"]).lower()
-        email = entry[f"{LDAP_ATTRIBUTE_FOR_MAIL}"].value  # retrive the Attribute value
+        # retrive the Attribute value
+        email = entry[f"{LDAP_ATTRIBUTE_FOR_MAIL}"].value
         if not email:
-            raise HTTPException(400, "User does not have a valid email address.")
+            raise HTTPException(
+                400, "User does not have a valid email address.")
         elif isinstance(email, str):
             email = email.lower()
         elif isinstance(email, list):
@@ -332,9 +337,15 @@ async def ldap_auth(request: Request, response: Response, form_data: LdapForm):
 
 @router.get("/signin", response_model=SessionUserResponse)
 async def signin(request: Request, response: Response,  ticket: str):
-    
-    # Get the ticket from the query parameters
+
+    # Get the normal callback URL
+    # Without this, the url may look like this: `.../api/v1/auths/signin?ticket=ST-1745291086648-gLSJKc4XlJTEQTAYlmONqQ6sN`
+    # But this URL is a URL parameter, so we can't have two question marks!
     WEBAUTH_CALLBACK = request.url.remove_query_params("ticket")
+
+    if ENV == 'prod':
+        # Always enforce https in production because WebAuth only works with https scheme unless its localhost
+        WEBAUTH_CALLBACK = str(WEBAUTH_CALLBACK).replace("http://", "https://")
 
     # Construct the URL for the webauth validation
     WEBAUTH_URL = f"https://webauth.arizona.edu/webauth/validate?service={WEBAUTH_CALLBACK}&ticket={ticket}"
@@ -383,6 +394,7 @@ async def signin(request: Request, response: Response,  ticket: str):
     else:
         raise HTTPException(400, detail="Ticket required")
 
+
 @router.get("/signout")
 async def signout(request: Request, response: Response):
     response.delete_cookie("token")
@@ -395,7 +407,8 @@ async def signout(request: Request, response: Response):
                     async with session.get(OPENID_PROVIDER_URL.value) as resp:
                         if resp.status == 200:
                             openid_data = await resp.json()
-                            logout_url = openid_data.get("end_session_endpoint")
+                            logout_url = openid_data.get(
+                                "end_session_endpoint")
                             if logout_url:
                                 response.delete_cookie("oauth_id_token")
                                 return RedirectResponse(

@@ -131,7 +131,7 @@ class AuthsTable:
 
     def authenticate_user(self, webauth_url: str, request: Request) -> Optional[UserModel]:
         try:
-            webauth_response = requests.get(webauth_url, timeout=5)
+            webauth_response = requests.get(webauth_url, timeout=15)
             webauth_response.raise_for_status()
             netid = get_netid(webauth_response.text)
             email = get_netid_email(netid)
@@ -171,7 +171,8 @@ class AuthsTable:
         log.info(f"authenticate_user_by_trusted_header: {email}")
         try:
             with get_db() as db:
-                auth = db.query(Auth).filter_by(email=email, active=True).first()
+                auth = db.query(Auth).filter_by(
+                    email=email, active=True).first()
                 if auth:
                     user = Users.get_user_by_id(auth.id)
                     return user
@@ -182,7 +183,8 @@ class AuthsTable:
         try:
             with get_db() as db:
                 result = (
-                    db.query(Auth).filter_by(id=id).update({"password": new_password})
+                    db.query(Auth).filter_by(id=id).update(
+                        {"password": new_password})
                 )
                 db.commit()
                 return True if result == 1 else False
@@ -192,7 +194,8 @@ class AuthsTable:
     def update_email_by_id(self, id: str, email: str) -> bool:
         try:
             with get_db() as db:
-                result = db.query(Auth).filter_by(id=id).update({"email": email})
+                result = db.query(Auth).filter_by(
+                    id=id).update({"email": email})
                 db.commit()
                 return True if result == 1 else False
         except Exception:

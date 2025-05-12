@@ -236,9 +236,8 @@ async def ldap_auth(request: Request, response: Response, form_data: LdapForm):
             ],
         )
 
-        if not search_success:
-            raise HTTPException(
-                400, detail="User not found in the LDAP server")
+        if not search_success or not connection_app.entries:
+            raise HTTPException(400, detail="User not found in the LDAP server")
 
         entry = connection_app.entries[0]
         username = str(entry[f"{LDAP_ATTRIBUTE_FOR_USERNAME}"]).lower()
